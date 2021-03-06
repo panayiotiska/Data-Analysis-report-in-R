@@ -1,7 +1,7 @@
 ---
 title: "Data Analysis report using R  \nThe unsuccessful performance of the Los Angeles Lakers team"
 author: Panayiotis Kattides
-email: KattidesP@cardiff.ac.uk
+email: panayiotiska@outlook.com
 date:  "`r format(Sys.time(), '%d %B %Y')`"
 
 fontsize: 11pt
