@@ -1,0 +1,577 @@
+---
+title: "Data Analysis report using R  \nThe unsuccessful performance of the Los Angeles Lakers team"
+author: Panayiotis Kattides
+email: KattidesP@cardiff.ac.uk
+date:  "`r format(Sys.time(), '%d %B %Y')`"
+
+fontsize: 11pt
+fontfamily: times
+geometry: margin=1in
+
+output:
+  bookdown::pdf_document2:
+
+    toc: true
+    number_sections: true
+    keep_tex: true 
+    citation_package: natbib
+    fig_caption: true 
+    
+    highlight: haddock 
+    df_print: kable
+    extra_dependencies:
+      caption: ["labelfont={bf}"]
+
+bibliography: [refs.bib]
+biblio-style: apalike
+link-citations: yes
+
+abstract: The goal of this study is to investigate the reasons behind the unsuccessful performance for the Los Angeles Lakers team during the period of 2016-2017 of their NBA career. I compare the team’s performance by itself under different circumstances and also with the performance of some of the leading teams of that period in order to discover the most important factors that led to the displeasing image. Using various descriptive and inferential statistical methods it can be concluded that the team's strategy can improve with the advice of the strategy of some of the leading teams or by looking back at some adequate performances the team had. Although, by examining some variables which seem to contribute to the efficiency of the shots the players make, it is difficult to give very specific advice to the team. The reason for that is because a very large amount of variables may be associated with whether a shot is going to be succesfull or not. Most of these variables are unfortunately hard to obtain.
+---
+
+<!-- set knitr options here -->
+
+```{r setup, include=FALSE}
+library(kableExtra)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+
+# Include libraries
+library(corrplot)
+require(dplyr)
+library(broom)
+library(purrr)
+library(ggpubr)
+
+# Read the data
+data = read.csv('nbadata.csv', header=TRUE)
+
+# Add new column TEAM_SHOOTING
+data$TEAM_SHOOTING <- data$AWAY_TEAM
+
+data$TEAM_SHOOTING[data$LOCATION == 'H'] <- data$HOME_TEAM
+
+#Add a new column month
+data$MONTH <- substring(data$DATE,0,3) #year is 9,12
+
+#Add new column for game clock in seconds
+data$GAME_CLOCK_SECS <- as.integer(as.difftime(data$GAME_CLOCK, format="%M:%S", units="secs"))
+
+# Clean the data
+
+# Replace NA values with the mean of the column
+data$SHOT_CLOCK[is.na(data$SHOT_CLOCK)]<-mean(data$SHOT_CLOCK, na.rm = TRUE)
+
+# Replace negative values with NA
+data$TOUCH_TIME <- replace(data$TOUCH_TIME, which(data$TOUCH_TIME < 0), NA) 
+
+# Replace NA values with the mean of the column
+data$TOUCH_TIME[is.na(data$TOUCH_TIME)]<-mean(data$TOUCH_TIME, na.rm = TRUE)
+
+get_team_data <- function(some_data, team_name) {
+    
+    team_data = subset(data, HOME_TEAM == team_name | AWAY_TEAM == team_name)
+        
+    return(team_data)
+}
+
+get_continuous_data <- function(some_data, except=0) {
+    
+    # Remove the ID columns
+    ID_columns <- c('GAME_ID','PLAYER_ID','CLOSEST_DEFENDER_ID')
+    
+    continuous_data <- some_data[, !(colnames(some_data) %in% ID_columns), drop = FALSE]
+    
+    # Extract only the numeric columns
+    nums <- unlist(lapply(continuous_data, is.numeric))
+    
+    #Make an exception if given
+    if (except != 0){
+        nums[except] <- TRUE
+    }
+
+    continuous_data <- continuous_data[ , nums]
+        
+    return(continuous_data)
+}
+
+```
+
+```{r, include=FALSE}
+
+# Get Los Angeles Lakers (LAL) data
+
+lal_data = get_team_data(data, 'LAL')
+
+lal_continuous_data <- get_continuous_data(lal_data)
+
+lal_mean_temp <- lapply(lal_continuous_data, mean)
+
+lal_var_temp <- lapply(lal_continuous_data, var)
+
+```
+
+```{r, include=FALSE}
+
+# Get Minnesota Timberwolves (MIN) data
+
+min_data <- get_team_data(data, 'MIN')
+
+min_continuous_data <- get_continuous_data(min_data)
+
+```
+
+\pagebreak
+
+<!-- main body starts here -->
+
+# Introduction {#intro}
+
+The dataset used for this study records every shot attempt made from October 2014 to March 2015 including many categorical variables describing the status of the game, the player and the shot\'s result, when the continuous variables describe the circumstances under the shot was taken. On this paper I examine what results a team\'s performance to be defective and what advice could make the team more efficient.
+
+At first an exploratory descriptive analysis shows what makes a team defective and some important features of the inferior team are illustrated. Next, the team is compared with a team with very high win ratio in order to show if there are any significant differences between the two performances. After that, the course of the team per month is pictured, in order to investigate different sub-periods individually. Lastly, a logistic regression model is being build for measuring the importance of some variables regarding the shot success rate of the team.
+
+# Background {#sec:background}
+
+In previous researches, Los Angeles Lakers appear to be one of the best teams in the history of NBA. Specifically, as mentioned by [@yang2014measuring], during the period of 2003 - 2009, Lakers experienced the best efficiency on average. Also, the Los Angeles Lakers experienced the highest overall efficiency during the 2006–2007 and 2007–2008 seasons. In the 2008–2009 season, Los Angeles Lakers achieved the highest efficiency of 100 % compared with other teams, suggesting that the team, together with a few other teams were the most efficient in transforming salary into the intermediate output of player\'s on-court performances, leading to the final outputs of winning games and generating revenue. 
+
+As additionally mentioned, the Los Angeles Lakers and New York are large market teams that normally spend a higher payroll and succeed in obtaining higher winning percentages and higher revenue. These are some of the reasons that made me curious about the Lakers performance during the years examined on this paper and what led to that disastrous performance.
+
+[@da2020statistical] demonstrates that certain shots are more efficient than others, and shows that the playing tendencies of teams and players have drastically changed in the last 10 years. It shows that there is a negative relationship between shot distance and the logit of making a shot. In that paper they also predicted probability of making the shot in relation to shot distance and proved that at some point shooting a two becomes less efficient than shooting a three. For this reason, I thought that shot distance as a variables that varies over the years it will be a good choice to be included for further investigation.
+
+In another paper, [@depren10effectiveness], they present which factors have an important role in National Basketball Association player’s shooting accuracy. To achieve this purpose, player-based raw-dataset for each match on the 2014-2015 NBA season is used and seven different machine learning algorithms are applied, using 10-fold cross-validation with 10-repeat process for avoiding problems like overfitting.
+This paper concluded using the k-NN algorithm that the most important factors for shooting accuracy of a basketball player are shot distance, distance of closest defense player and touch time.
+
+\pagebreak
+
+# Descriptive analysis
+
+```{r games-data-per-team, echo=FALSE}
+
+# Returns a row for each game
+one_row_per_game <- data[!duplicated(data$GAME_ID),]
+
+# Count the home games per team 
+num_home_games <- one_row_per_game %>% count(HOME_TEAM)
+
+# Count the away games per team 
+num_away_games <- one_row_per_game %>% count(AWAY_TEAM)
+
+# Merge to a dataframe the two previous counts
+teams_data <- merge(num_home_games, num_away_games, by=1)
+
+# Calculate the total games into a new column
+teams_data$TOTAL_GAMES <- teams_data$n.x + teams_data$n.y
+
+#Counts the number of wins for the teams played in HOME
+Home_W_Per_Team <- table(one_row_per_game[one_row_per_game$W == 'W', "HOME_TEAM"])
+
+#Counts the number of wins for the teams played AWAY
+Away_W_Per_Team <- table(one_row_per_game[one_row_per_game$W == 'W', "AWAY_TEAM"])
+
+#Sum the number of wins per team for both home and away games sorted
+W_Per_Team <- sort(Home_W_Per_Team + Away_W_Per_Team, decreasing = TRUE, na.last = NA)
+
+# Merge the dataframe with the wins per team table
+teams_data <- merge(teams_data,W_Per_Team, by=1)
+
+# Calculate the win ration for every team
+teams_data$WIN_RATIO <- teams_data$Freq / teams_data$TOTAL_GAMES
+
+# Assign column names
+colnames(teams_data) <- c('TEAM','HOME_GAMES','AWAY_GAMES', 'TOTAL_GAMES', 'WON_GAMES', 'WIN_RATIO')
+
+# Sort dataframe based on win ratio
+teams_data <- teams_data[order(teams_data$WIN_RATIO, decreasing = TRUE),] 
+
+# Print team with max ratio
+best_win_ratio_team <- teams_data[which.max(teams_data$WIN_RATIO),]
+#best_win_ratio_team
+
+# Print team with min ratio
+worst_win_ratio_team <- teams_data[which.min(teams_data$WIN_RATIO),]
+#worst_win_ratio_team
+
+knitr::kable(
+  #head(teams_data, 3),
+  rbind(head(teams_data, 3), tail(teams_data, 1)),
+  caption = 'The top 3 teams based on their win ratio together with Los Angeles Lakers which is the team with the lowest win ration. The win ration is calculated from the total games a team played devided by the number of the team\'s won games',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+Both `r teams_data$TEAM[1]` and `r teams_data$TEAM[2]` teams have the highest win-ratio of all teams with the significantly high rate of almost `0.8`. On the other hand, Los Angeles Lakers seem to have a difficult time in the league with a win ration of under 30%.
+
+```{r final-margin-boxplot, echo = FALSE, fig.cap = "Boxplot", fig.align = "center"}
+
+boxplot_data <- get_team_data(one_row_per_game, 'LAL')
+
+boxplot_data <- get_continuous_data(boxplot_data, 'MONTH')
+
+# Sort months by custom order
+boxplot_data$MONTH <- factor(boxplot_data$MONTH, levels = c("OCT", "NOV", "DEC", "JAN", "FEB", "MAR"))
+
+boxplot_data <- boxplot_data[order(boxplot_data$MONTH),]
+
+options(repr.plot.width=4, repr.plot.height=2)
+
+boxplot(boxplot_data$FINAL_MARGIN~boxplot_data$MONTH, data=boxplot_data[,-1], col='orange')
+
+```
+
+The box-plot above shows how the performance of the team changed over the months. It illustrates the average margin of points the team had with the opponent team on every month of the examined period. In the first three months shown, the average final margin is being under zero with February and March appearing to be the most efficient months for the team.
+
+\pagebreak
+
+```{r summary-continious-lal-data, echo=FALSE}
+
+knitr::kable(
+  summary(select(lal_data, SHOT_NUMBER, DRIBBLES, TOUCH_TIME, SHOT_DIST, FGM)), #DRIBBLES, PTS_TYPE
+  caption = 'Summary of continuous data of Los Angeles Lakers',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+Table two shows the summary of some variables I considered important for predicting if a shot is going to be successful or not. It is important to mention that the `LAL` player\'s perform in average less than two dribbles and keep the ball just `2.85` seconds in average before shooting. An average player shots only about six times in a game and the average shot distance is `13.89` feet while most shoots are shot from `~5 to ~22` feet. Finally, the mean value for scores made is under 50% as observed from the `FGM` variables which shows whether a shot is succesfuly made or not.
+
+```{r histo-touch-time-shot-dist, echo = FALSE, fig.cap = "Histograms of touch time and shot distance for the Los Angeles Lakers team.", fig.align = "center"}
+
+options(repr.plot.width=10, repr.plot.height=5)
+
+par(mfrow=c(1,2))
+
+hist(lal_continuous_data$TOUCH_TIME, freq=FALSE, col='coral2', main=NULL)
+
+hist(lal_continuous_data$SHOT_DIST, freq=FALSE, col='cornsilk1', main=NULL)
+
+```
+
+The two histograms illustrated, do not seem to follow a normal distribution because unfortunately I do not have enough samples, although, based on what the `central limit theorem` suggests, I will assume that all the variables used in this paper are normally distributed.
+
+\pagebreak
+
+# Inferential Analysis
+
+## Differences between `shot distance` for `LAL lost games` and `MIN won games`
+
+```{r, include=FALSE}
+
+#Get LAL - Team data
+lal_loses_data = subset(lal_data, W == 'L')
+lal_continuous_loses_data <- get_continuous_data(lal_loses_data)
+lal_wins_data = subset(lal_data, W == 'W')
+lal_continuous_wins_data <- get_continuous_data(lal_wins_data)
+
+#Get MIN - Team data
+min_data <- get_team_data(data, 'MIN')
+min_continuous_data <- get_continuous_data(min_data)
+min_won_data = subset(min_data, W == 'W')
+min_continuous_won_data <- get_continuous_data(min_won_data)
+
+```
+
+```{r histo-first-test, echo = FALSE, fig.cap = "Histograms of lost games for LAL and won games for MIN", fig.align = "center"}
+
+options(repr.plot.width=10, repr.plot.height=5)
+
+par(mfrow=c(1,2))
+hist(lal_continuous_loses_data$SHOT_DIST, freq=FALSE, col='cadetblue3',xlab='lal_continuous_loses', main=NULL)
+
+hist(min_continuous_won_data$SHOT_DIST, freq=FALSE, col='burlywood4',xlab='min_continuous_wins', main=NULL)
+
+```
+
+### Test for equality of varainces
+
+```{r first-var-test1, echo=FALSE, message=FALSE}
+
+t1 <- var.test(lal_continuous_loses_data$SHOT_DIST, min_continuous_won_data$SHOT_DIST, alternative = "two.sided", conf.level=0.95)
+
+tab1 <- map_df(list(t1), tidy)
+
+dataframe_list1 <- list(
+    tab1[1:7],
+    tab1[8:9]
+)
+
+knitr::kable(
+  dataframe_list1,
+  caption = 'Test for equality of varainces',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+We observe that $1$ does not belong to the confidence region at the significance level $\alpha=0.05$, and we thus conclude that there is **not** strong statistical evidences suggesting that the variances of the shot distance during the won games of the $MIN$ team and the lost games of the $LAL$ team may be equal. Also, the distributions of the two samples do not seem to be Gaussian; however, the sample sizes are quite large ($>5000$ observation for MIN, and $>5000$ for LAL), so that the Gaussian approximation is realistic.
+
+```{r first-var-test2, echo=FALSE, message=FALSE}
+
+t2 <- var.test(lal_continuous_loses_data$SHOT_DIST, min_continuous_won_data$SHOT_DIST, alternative = "greater", conf.level=0.95)
+
+tab2 <- map_df(list(t2), tidy)
+
+dataframe_list2 <- list(
+    tab2[1:7],
+    tab2[8:9]
+)
+
+knitr::kable(
+  dataframe_list2,
+  caption = 'Test for difference of varainces (LAL greater MIN)',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+The previous two-sample variance tests indicates that there is very strong statistical evidences suggesting that the variance of shot distance for `LAL - loses` is larger than the one for `MIN - Wins`.
+
+```{r first-var-test3, echo=FALSE, message=FALSE}
+
+t3 <- t.test(lal_continuous_loses_data$SHOT_DIST, min_continuous_won_data$SHOT_DIST, alternative = "two.sided", conf.level=0.95, var.equal=FALSE)
+
+tab3 <- map_df(list(t3), tidy)
+
+dataframe_list3 <- list(
+    tab3[1:7],
+    tab3[8:9]
+)
+
+knitr::kable(
+  dataframe_list3,
+  caption = 'Test for equality of mean',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+We observe that  0  does not belong to the  95%  confidence region for the var.equal=FALSE test; the obtained p-value is also relatively low. We thus conclude that there is statistical evidences suggesting that the mean shot distance of the won games of MIN could be different of the mean of the lost games of LAL.
+
+```{r first-var-test4, echo=FALSE, message=FALSE}
+
+t4 <- t.test(min_continuous_won_data$SHOT_DIST, lal_continuous_loses_data$SHOT_DIST, alternative = "greater", conf.level=0.95, var.equal=FALSE)
+
+tab4 <- map_df(list(t4), tidy)
+
+dataframe_list4 <- list(
+    tab4[1:7],
+    tab4[8:9]
+)
+
+knitr::kable(
+  dataframe_list4,
+  caption = 'Test for difference of mean (MIN greater LAL)',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+The test for the difference in mean indicates that the mean number of shot distance during the MIN - won games is significatly larger that the mean number of shot distance during the LAL - lost games.
+
+From the variance and mean tests we conclude that Los Angeles Lakers, on their lost games they used to attempt to shot from shorter distance than the players of the Minnesota Timberwolves team. This could led the Timberwolves players to achieve more three-points which is maybe a more worth it to follow strategy.
+
+\pagebreak
+
+## Difference in the mean `touch time` as function of the `Month`
+
+```{r ggline-touchtime-month, echo = FALSE, fig.cap = "Plot of the touch time per month", fig.align = "center"}
+
+lal_data$MONTH <- factor(lal_data$MONTH, levels = c("OCT", "NOV", "DEC", "JAN", "FEB", "MAR"))
+
+lal_data <- lal_data[order(lal_data$MONTH),]
+
+options(repr.plot.width=16, repr.plot.height=5)
+
+ggline(lal_data, x = 'MONTH', y = 'TOUCH_TIME', 
+       add = c('mean_se', 'jitter', 'violin'), color = 'steelblue',
+       ylab = 'TOUCH_TIME', xlab = 'MONTH')
+
+```
+
+The touch time seems to follow a similar distribution of the samples for all the months shown.
+
+```{r second-test1, echo=FALSE, message=FALSE}
+
+t1b <- fligner.test(TOUCH_TIME ~ MONTH, data=lal_data)
+
+tab1b <- map_df(list(t1b), tidy)
+
+knitr::kable(
+  tab1b,
+  caption = 'Fligner-Killeen test of homogeneity of variances',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+```{r second-test2, echo=FALSE, message=FALSE}
+
+t2b <- bartlett.test(TOUCH_TIME ~ MONTH, data=lal_data)
+
+tab2b <- map_df(list(t2b), tidy)
+
+knitr::kable(
+  tab2b,
+  caption = 'Bartlett test of homogeneity of variances',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+We obtain a p-value a little larger that  0.05 , so that the variances for the touch time each month may potentially not be equal. The Fligner-Killeen test thus suggest that the month the game took place appears not to have a statistically significant effect on the variance of the touch time during the corresponding months.
+
+\pagebreak
+
+```{r second-test3, echo=FALSE, message=FALSE}
+
+# Compute the analysis of variance
+res.aov1 <- aov(TOUCH_TIME ~ MONTH, data=lal_data)
+
+# Summary of the analysis
+
+t3b <- summary(res.aov1)
+
+t3b <- do.call(rbind.data.frame, t3b)
+
+knitr::kable(
+  t3b,
+  caption = 'Summary of the anova test on the residuals',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+```{r second-test4, echo=FALSE, message=FALSE}
+
+t4b <- oneway.test(TOUCH_TIME ~ MONTH, data=lal_data)
+
+tab4b <- map_df(list(t4b), tidy)
+
+knitr::kable(
+  tab4b,
+  caption = 'One-way analysis of means (not assuming equal variances)',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+The obtained p-values are significantly high (more than 0.5); the ANOVAs (with and without assuming equlity of variances) thus suggest that the month the game took place appears not to have a statistically significant effect on the mean touch time during the corresponding months. 
+
+```{r normalqq-touchtime-month, echo = FALSE, fig.cap = "Comparing two probability distributions by plotting their quantiles against each other.", fig.align = "center"}
+
+options(repr.plot.width=4, repr.plot.height=4)
+
+plot(res.aov1, 2)
+
+```
+
+```{r second-test5, echo=FALSE, message=FALSE}
+
+# shapiro.test can not be applied to more than 5000 points
+sample_size <- nrow(lal_data)
+
+tab5b <- shapiro.test(res.aov1$residuals[sample(1:sample_size, 5000)])
+
+tab5b <- map_df(list(tab5b), tidy)
+
+knitr::kable(
+  tab5b,
+  caption = 'Shapiro-Wilk normality test',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+The distribution of the residuals obtained for the ANOVA res.aov1 appears significantly different from a Gaussian distribution as also shown in the `figure 5`. The sample size is nevertheless relatively large, so that the central limit theorem may the conclusions drawn could potentially be realistic (i.e. the group sample mean may be close to have Gaussian distributions).
+
+```{r TukeyHSD-table, echo=FALSE, message=FALSE}
+
+tab6b <- TukeyHSD(res.aov1)
+
+tab6b <- map_df(list(tab6b), tidy)
+
+knitr::kable(
+  tail(tab6b, 4),
+  caption = 'Tukey multiple comparison of means',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+The pairwise comparisons of means (95% family-wise confidence level) suggests that there is a statistically significant difference for many pairs of months (for instance, NOV-MAR and OCT-MAR). Regarding the observations from the *figure \@ref(fig:final-margin-boxplot)* and the notice that the mean of the touch time that players of the Los Angeles Lakers team keep the ball before shooting on March is significantly larger compared to October and November; a consideration could be made, that the players are getting more concentrated and careful when the end of the event is closer.
+
+## `Logistic regression` on successful shot prospect
+
+Predicting the probability that a shot is made successfully if variables SHOT_DISTANCE and TOUCH_TIME are given. This model will allow us to examine what influence the two variables have on whether a shot is successfully made or not. I ran the logistic regression model using the `FGM` as the target variable. The null hypothesis of the model is that shot distance and touch time do not influence the probability of successfully making a shot.
+
+```{r, include=FALSE}
+
+glm_data <- lal_data[c("TOUCH_TIME","SHOT_DIST","FGM")]
+
+sample_size <- nrow(glm_data)
+
+Ind_IN <- (1:sample_size)[glm_data$FGM == '1']
+Ind_OUT <- (1:sample_size)[glm_data$FGM == '0']
+
+Ind_INxOUT <- c(Ind_IN, Ind_OUT)
+
+n_IN <- length(Ind_IN)
+n_OUT <- length(Ind_OUT)
+n_INxOUT <- n_IN + n_OUT
+
+IsIN <- rep(0,n_INxOUT)
+
+IsIN[1:n_IN] <- 1 
+
+IsIN <- factor(IsIN)
+
+data_INxOUT <- glm_data[Ind_INxOUT, 1:2]
+data_INxOUT$IsIN <- IsIN
+
+logistic_regr <- glm(IsIN ~ TOUCH_TIME + SHOT_DIST, family=binomial(link='logit'), data=data_INxOUT)
+
+smr <- summary(logistic_regr)
+
+```
+
+```{r logistic-reg-table, echo=FALSE, message=FALSE}
+
+knitr::kable(
+  as.data.frame(coef(smr)),
+  caption = 'Logistic regression estimators output',
+  align = 'cccc',
+  booktabs = TRUE)%>%kable_styling(latex_options = "HOLD_position") 
+```
+
+From the above table, we can observe that the `P-values` are zero; from that we can assume that the log(odds) and the log(odds ratios) are both statistically significant. Although, the effect sizes shown on the estimate column are considerably low. That means that whether a shot is made or missed, depends on the two variables examined but not in a very significant rate. Specifically, only `-0.046` for the `TOUCH_TIME` variable and `-0.048` for the `SHOT_DIST` variable. This means that a slight reduce on both the touch time and the shot distance from the players whenever they shoot might help the accuracy of the shot.
+
+The reason for the effect of the variables being too small may occur by the fact that whether the shot is going to be succesfull or not is affected by many more variables and not just the two examined on this paper.
+
+```{r, include=FALSE}
+
+ll.null <- logistic_regr$null.deviance/-2
+
+ll.proposed <- logistic_regr$deviance/-2
+
+r_sqrt <- (ll.null - ll.proposed) / ll.null
+
+pchisq <- 1 - pchisq(2*(ll.proposed - ll.null), df=1)
+
+```
+
+We can also calculate the Pseudo R(sqrt) which will give a more general image for this model.
+
+$$R^2 = \text{`r r_sqrt` - indicates the overall effect of the two examined variables.}$$
+
+$$P-value = \text{`r pchisq` - the p-value for the } R^2 \text{ using a Chi-square distribution.}$$
+
+As expected, the R(sqrt) has a low value (low affect on the `FGM` variable), although both the variables used are being statistically significant.
+
+# Conclusion
+
+In conclusion, as the goal of this paper is to give advice for improvement to the Los Angeles Lakers team of 2014-2015; regarding the results extracted by the inferential analysis made, we can advice the players to shoot the ball from longer distances, following the habits of one of the best teams of that period of time, Minnesota Timberwolves which gives us the suspicion that they might attempt more three-pointers than the Los Angeles team.
+
+Another advice for the Los Angeles Lakers team could be to keep the ball longer before shooting, allowing themselves to aim better and get more steady on their feet, as this seem that affected there performance negatively during the months October and Nobember 2014.
+
+A final conclusion, regarding the logistic regression model built during this research, is that the two variables mentioned above are affecting a shot by a very small percentage. In order to investigate more in depth the successfulness of a shot we need much more variables, even more than someone could think of.
+
+\pagebreak
+
+# Appendix.
+
+```{r, include=TRUE, echo=FALSE}
+
+smr
+
+```
